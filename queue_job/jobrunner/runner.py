@@ -132,7 +132,7 @@ Caveat
 .. [2] It works with the threaded Odoo server too, although this way
        of running Odoo is obviously not for production purposes.
 """
-
+import platform
 from contextlib import closing, contextmanager
 import datetime
 import logging
@@ -364,7 +364,7 @@ class QueueJobRunner(object):
         self.channel_manager.simple_configure(channel_config_string)
         self.db_by_name = {}
         self._stop = False
-        self._stop_pipe = os.pipe()
+        self._stop_pipe = platform.system() is not 'Windows' and os.pipe() or None
 
     @classmethod
     def from_environ_or_config(cls):
@@ -457,7 +457,8 @@ class QueueJobRunner(object):
         # wait for something to happen in the queue_job tables
         # we'll select() on database connections and the stop pipe
         conns = [db.conn for db in self.db_by_name.values()]
-        conns.append(self._stop_pipe[0])
+        if self._stop_pipe:
+            conns.append(self._stop_pipe[0])
         # look if the channels specify a wakeup time
         wakeup_time = self.channel_manager.get_wakeup_time()
         if not wakeup_time:
@@ -483,8 +484,11 @@ class QueueJobRunner(object):
     def stop(self):
         _logger.info("graceful stop requested")
         self._stop = True
-        # wakeup the select() in wait_notification
-        os.write(self._stop_pipe[1], b'.')
+        if platform.system() is 'Windows':
+            _logger.warning("Stop request not signaled on Windows because select does not support pipes.")
+        else:
+            # wakeup the select() in wait_notification
+            os.write(self._stop_pipe[1], b'.')
 
     def run(self):
         _logger.info("starting")
